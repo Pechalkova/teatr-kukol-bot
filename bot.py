@@ -220,11 +220,9 @@ def parse_event_list(html):
 
 
 def page_has_available_seat(html):
+    soup = BeautifulSoup(html, "html.parser")
 
-    text = BeautifulSoup(
-        html,
-        "html.parser"
-    ).get_text(" ", strip=True).lower()
+    text = soup.get_text(" ", strip=True).lower()
 
     sold_out = [
         "мест нет",
@@ -237,70 +235,44 @@ def page_has_available_seat(html):
     if any(word in text for word in sold_out):
         return False
 
-    soup = BeautifulSoup(html, "html.parser")
-
-    for element in soup.find_all(True):
-
-        attrs = " ".join(
-            str(value).lower()
-            for key, value in element.attrs.items()
-            if key in (
-                "class",
-                "id",
-                "title",
-                "aria-label",
-                "data-seat",
-                "data-status",
-                "data-state"
-            )
-        )
-
-        if any(
-            word in attrs
-            for word in (
-                "seat",
-                "мест",
-                "available",
-                "free"
-            )
-        ):
-
-            blob = " ".join([
-                attrs,
-                element.get_text(
-                    " ",
-                    strip=True
-                ).lower()
-            ])
-
-            if any(
-                word in blob
-                for word in (
-                    "available",
-                    "available-seat",
-                    "свобод",
-                    "free"
-                )
-            ):
-                return True
-
-    buy_words = [
-        "купить билет",
-        "выбрать место",
-        "забронировать",
-        "купить"
+    green_markers = [
+        "#00ff00",
+        "#008000",
+        "#00a000",
+        "#00b000",
+        "#00c000",
+        "#00d000",
+        "#00e000",
+        "#00f000",
+        "rgb(0, 255, 0)",
+        "rgb(0,255,0)",
+        "green",
+        "свобод",
+        "free",
+        "available",
     ]
 
-    if any(word in text for word in buy_words):
-        if (
-            "мест нет" not in text
-            and "билетов нет" not in text
-        ):
+    seat_markers = [
+        "seat",
+        "мест",
+        "data-seat",
+        "data-status",
+        "data-state",
+    ]
+
+    for element in soup.find_all(True):
+        attrs = " ".join(
+            f"{key}={value}"
+            for key, value in element.attrs.items()
+        ).lower()
+
+        if not any(marker in attrs for marker in seat_markers):
+            continue
+
+        if any(marker in attrs for marker in green_markers):
             return True
 
     return False
-
-
 def scan():
     response = session.get(
         AFISHA,
