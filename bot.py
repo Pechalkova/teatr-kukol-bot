@@ -281,7 +281,10 @@ def scan():
     events = parse_event_list(
         response.text
     )
-
+print(
+    f"AFISHA DEBUG: status={response.status_code}; "
+    f"bytes={len(response.text)}; events={len(events)}"
+)
     results = []
 
     for event in events:
