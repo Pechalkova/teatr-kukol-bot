@@ -261,8 +261,6 @@ def parse_event_list(html):
             href
         )
 
-        # Телефоны и другие не-HTTP ссылки
-        # не являются страницами спектаклей.
         if parsed.scheme == "tel":
             continue
 
@@ -273,15 +271,12 @@ def parse_event_list(html):
         ):
             continue
 
-        # Не уходим на сторонние сайты.
         if (
             parsed.netloc
             and parsed.netloc != site_host
         ):
             continue
 
-        # Не рассматриваем саму страницу афиши
-        # как событие.
         if parsed.path.rstrip("/") in (
             "",
             "/afisha",
@@ -300,7 +295,6 @@ def parse_event_list(html):
         parent = a
         context = ""
 
-        # Ищем дату выше по HTML-структуре.
         for _ in range(10):
 
             parent = parent.parent
@@ -377,8 +371,6 @@ def page_has_available_seat(html):
     ):
         return False
 
-    # На схеме зала зелёные места
-    # означают свободные места.
     green_markers = [
         "#00ff00",
         "#008000",
@@ -388,15 +380,11 @@ def page_has_available_seat(html):
         "#00d000",
         "#00e000",
         "#00f000",
-
         "rgb(0, 255, 0)",
         "rgb(0,255,0)",
-
         "rgba(0, 255, 0",
         "rgba(0,255,0",
-
         "green",
-
         "свобод",
         "free",
         "available",
@@ -452,6 +440,18 @@ def scan():
         f"events={len(events)}"
     )
 
+    # Диагностика найденных событий.
+    for event in events:
+        print(
+            "EVENT FOUND:",
+            event["date"],
+            event["time"],
+            "|",
+            event["title"],
+            "|",
+            event["url"]
+        )
+
     results = []
 
     for event in events:
@@ -480,6 +480,13 @@ def scan():
             continue
 
         event["available"] = available
+
+        print(
+            "SEATS:",
+            event["title"],
+            "=",
+            available
+        )
 
         results.append(
             event
@@ -524,8 +531,6 @@ def main():
             event["available"]
         )
 
-        # Сообщаем только тогда,
-        # когда место появилось.
         if new and not old:
 
             message = (
