@@ -2,7 +2,6 @@ import os
 import re
 import json
 import base64
-from datetime import datetime
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -10,17 +9,20 @@ from bs4 import BeautifulSoup
 
 SITE = "https://puppet-minsk.by"
 AFISHA = SITE + "/afisha"
+
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 REPO = os.environ["GITHUB_REPOSITORY"]
 GH_TOKEN = os.environ["GITHUB_TOKEN"]
 
 STATE_FILE = "state.json"
+
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (ticket-checker; +https://github.com/)"
+    "User-Agent": "Mozilla/5.0 (ticket-checker)"
 }
 
 session = requests.Session()
 session.headers.update(HEADERS)
+
 
 def github_api(method, url, **kwargs):
     headers = kwargs.pop("headers", {})
@@ -31,98 +33,199 @@ def github_api(method, url, **kwargs):
     })
     return session.request(method, url, headers=headers, timeout=30, **kwargs)
 
+
 def load_state():
     url = f"https://api.github.com/repos/{REPO}/contents/{STATE_FILE}"
     r = github_api("GET", url)
+
     if r.status_code == 200:
         data = r.json()
         raw = base64.b64decode(data["content"]).decode("utf-8")
         state = json.loads(raw)
         state["_sha"] = data["sha"]
         return state
+
     if r.status_code == 404:
-        return {"subscribers": [], "offset": 0, "events": {}}
-    raise RuntimeError(f"GitHub state read failed: {r.status_code} {r.text[:300]}")
+        return {
+            "subscribers": [],
+            "offset": 0,
+            "events": {}
+        }
+
+    raise RuntimeError(
+        f"GitHub state read failed: {r.status_code}"
+    )
+
 
 def save_state(state):
     sha = state.pop("_sha", None)
-    content = json.dumps(state, ensure_ascii=False, indent=2)
+
+    content = json.dumps(
+        state,
+        ensure_ascii=False,
+        indent=2
+    )
+
     payload = {
         "message": "Update bot state",
-        "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+        "content": base64.b64encode(
+            content.encode("utf-8")
+        ).decode("ascii"),
         "branch": "main",
     }
+
     if sha:
         payload["sha"] = sha
+
     url = f"https://api.github.com/repos/{REPO}/contents/{STATE_FILE}"
-    r = github_api("PUT", url, json=payload)
+
+    r = github_api(
+        "PUT",
+        url,
+        json=payload
+    )
+
     if not r.ok:
-        raise RuntimeError(f"GitHub state write failed: {r.status_code} {r.text[:500]}")
+        raise RuntimeError(
+            f"GitHub state write failed: {r.status_code}"
+        )
+
 
 def tg(method, payload=None):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
-    r = session.post(url, json=payload or {}, timeout=30)
+    url = (
+        f"https://api.telegram.org/"
+        f"bot{BOT_TOKEN}/{method}"
+    )
+
+    r = session.post(
+        url,
+        json=payload or {},
+        timeout=30
+    )
+
     r.raise_for_status()
+
     data = r.json()
+
     if not data.get("ok"):
         raise RuntimeError(str(data))
+
     return data["result"]
+
 
 def process_telegram_updates(state):
     offset = state.get("offset", 0)
-    updates = tg("getUpdates", {"offset": offset, "timeout": 0, "allowed_updates": ["message"]})
-    for u in updates:
-        state["offset"] = max(state.get("offset", 0), u["update_id"] + 1)
-        msg = u.get("message") or {}
-        chat = msg.get("chat") or {}
+
+    updates = tg(
+        "getUpdates",
+        {
+            "offset": offset,
+            "timeout": 0,
+            "allowed_updates": ["message"]
+        }
+    )
+
+    for update in updates:
+        state["offset"] = max(
+            state.get("offset", 0),
+            update["update_id"] + 1
+        )
+
+        message = update.get("message") or {}
+        chat = message.get("chat") or {}
+
         chat_id = chat.get("id")
-        text = (msg.get("text") or "").strip()
+        text = (message.get("text") or "").strip()
+
         if chat_id and text.startswith("/start"):
             if chat_id not in state["subscribers"]:
                 state["subscribers"].append(chat_id)
-            tg("sendMessage", {
-                "chat_id": chat_id,
-                "text": "Готово! Я буду проверять афишу Театра кукол и сообщать, когда появятся места."
-            })
+
+            tg(
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": (
+                        "Готово! 🎭\n\n"
+                        "Я буду проверять афишу "
+                        "Театра кукол и сообщать, "
+                        "когда появятся места."
+                    )
+                }
+            )
+
     return state
+
 
 def parse_event_list(html):
     soup = BeautifulSoup(html, "html.parser")
+
     result = {}
-    date_re = re.compile(r"\b(\d{2}\.\d{2}\.\d{4})\s+(\d{1,2}:\d{2})\b")
+
+    date_re = re.compile(
+        r"\b(\d{2}\.\d{2}\.\d{4})\s+(\d{1,2}:\d{2})\b"
+    )
+
     for a in soup.find_all("a", href=True):
+
         href = urljoin(AFISHA, a["href"])
         parsed = urlparse(href)
-        if parsed.netloc and parsed.netloc != urlparse(SITE).netloc:
+
+        if (
+            parsed.netloc
+            and parsed.netloc != urlparse(SITE).netloc
+        ):
             continue
-        title = " ".join(a.get_text(" ", strip=True).split())
+
+        title = " ".join(
+            a.get_text(" ", strip=True).split()
+        )
+
         if not title or len(title) < 2:
             continue
-        # The date is usually in the same table row/card as the event link.
+
         parent = a
         context = ""
+
         for _ in range(4):
             parent = parent.parent
+
             if not parent:
                 break
-            context = " ".join(parent.get_text(" ", strip=True).split())
+
+            context = " ".join(
+                parent.get_text(" ", strip=True).split()
+            )
+
             if date_re.search(context):
                 break
-        m = date_re.search(context)
-        if not m:
+
+        match = date_re.search(context)
+
+        if not match:
             continue
-        date_s, time_s = m.groups()
+
+        date_s, time_s = match.groups()
+
         key = href.split("#", 1)[0]
+
         result[key] = {
             "title": title,
             "date": date_s,
             "time": time_s,
             "url": key,
         }
+
     return list(result.values())
 
+
 def page_has_available_seat(html):
-    text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True).lower()
+
+    text = BeautifulSoup(
+        html,
+        "html.parser"
+    ).get_text(" ", strip=True).lower()
+
     sold_out = [
         "мест нет",
         "нет мест",
@@ -130,83 +233,188 @@ def page_has_available_seat(html):
         "распродано",
         "sold out",
     ]
-    if any(x in text for x in sold_out):
+
+    if any(word in text for word in sold_out):
         return False
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # Common accessibility/data markers used by seat-map widgets.
-    for el in soup.find_all(True):
+    for element in soup.find_all(True):
+
         attrs = " ".join(
-            str(v).lower()
-            for k, v in el.attrs.items()
-            if k in ("class", "id", "title", "aria-label", "data-seat", "data-status", "data-state")
+            str(value).lower()
+            for key, value in element.attrs.items()
+            if key in (
+                "class",
+                "id",
+                "title",
+                "aria-label",
+                "data-seat",
+                "data-status",
+                "data-state"
+            )
         )
-        if any(word in attrs for word in ("seat", "мест", "available", "free")):
+
+        if any(
+            word in attrs
+            for word in (
+                "seat",
+                "мест",
+                "available",
+                "free"
+            )
+        ):
+
             blob = " ".join([
                 attrs,
-                el.get_text(" ", strip=True).lower()
+                element.get_text(
+                    " ",
+                    strip=True
+                ).lower()
             ])
-            if any(x in blob for x in ("available", "available-seat", "свобод", "свободно", "free")):
+
+            if any(
+                word in blob
+                for word in (
+                    "available",
+                    "available-seat",
+                    "свобод",
+                    "free"
+                )
+            ):
                 return True
 
-    # Fallback: a visible purchase/booking control is a strong signal.
-    buy_words = ["купить билет", "выбрать место", "забронировать", "купить"]
-    if any(x in text for x in buy_words):
-        # Avoid treating a generic login/help text as availability.
-        if "мест нет" not in text and "билетов нет" not in text:
+    buy_words = [
+        "купить билет",
+        "выбрать место",
+        "забронировать",
+        "купить"
+    ]
+
+    if any(word in text for word in buy_words):
+        if (
+            "мест нет" not in text
+            and "билетов нет" not in text
+        ):
             return True
 
     return False
 
+
 def scan():
-    r = session.get(AFISHA, timeout=30)
-    r.raise_for_status()
-    events = parse_event_list(r.text)
-    # Do not hammer the theatre: a single pass over the current future afisha.
+    response = session.get(
+        AFISHA,
+        timeout=30
+    )
+
+    response.raise_for_status()
+
+    events = parse_event_list(
+        response.text
+    )
+
     results = []
+
     for event in events:
+
         try:
-            rr = session.get(event["url"], timeout=30)
-            rr.raise_for_status()
-            available = page_has_available_seat(rr.text)
-        except Exception as e:
-            print("EVENT ERROR", event["url"], repr(e))
+            page = session.get(
+                event["url"],
+                timeout=30
+            )
+
+            page.raise_for_status()
+
+            available = page_has_available_seat(
+                page.text
+            )
+
+        except Exception as error:
+            print(
+                "EVENT ERROR",
+                event["url"],
+                repr(error)
+            )
             continue
+
         event["available"] = available
         results.append(event)
+
     return results
 
+
 def main():
+
     state = load_state()
-    state = process_telegram_updates(state)
+
+    state = process_telegram_updates(
+        state
+    )
 
     try:
         events = scan()
-    except Exception as e:
-        print("AFISHA ERROR:", repr(e))
+
+    except Exception as error:
+        print(
+            "AFISHA ERROR:",
+            repr(error)
+        )
+
         save_state(state)
         return
 
     for event in events:
-        old = state["events"].get(event["url"], False)
-        new = bool(event["available"])
+
+        old = state["events"].get(
+            event["url"],
+            False
+        )
+
+        new = bool(
+            event["available"]
+        )
+
         if new and not old:
+
             message = (
                 "🎟️ Похоже, появились места!\n\n"
                 f"🎭 {event['title']}\n"
-                f"📅 {event['date']} {event['time']}\n\n"
-                f"Открыть страницу:\n{event['url']}"
+                f"📅 {event['date']} "
+                f"{event['time']}\n\n"
+                f"Открыть страницу:\n"
+                f"{event['url']}"
             )
-            for chat_id in list(state["subscribers"]):
+
+            for chat_id in list(
+                state["subscribers"]
+            ):
+
                 try:
-                    tg("sendMessage", {"chat_id": chat_id, "text": message})
-                except Exception as e:
-                    print("TELEGRAM ERROR", chat_id, repr(e))
+                    tg(
+                        "sendMessage",
+                        {
+                            "chat_id": chat_id,
+                            "text": message
+                        }
+                    )
+
+                except Exception as error:
+                    print(
+                        "TELEGRAM ERROR",
+                        chat_id,
+                        repr(error)
+                    )
+
         state["events"][event["url"]] = new
 
     save_state(state)
-    print(f"Checked {len(events)} events; subscribers={len(state['subscribers'])}")
+
+    print(
+        f"Checked {len(events)} events; "
+        f"subscribers="
+        f"{len(state['subscribers'])}"
+    )
+
 
 if __name__ == "__main__":
     main()
