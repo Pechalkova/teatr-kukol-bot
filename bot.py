@@ -277,8 +277,7 @@ def scan():
     )
 
     response.raise_for_status()
-
-    events = parse_event_list(
+events = parse_event_list(
     response.text
 )
 
