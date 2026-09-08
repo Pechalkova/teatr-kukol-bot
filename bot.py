@@ -9,7 +9,9 @@ from bs4 import BeautifulSoup
 
 
 SITE = "https://puppet-minsk.by"
-AFISHA = SITE + "/afisha"
+
+# Страница, где находятся билеты и афиша
+AFISHA = SITE + "/bilety/afisha"
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 REPO = os.environ["GITHUB_REPOSITORY"]
@@ -18,7 +20,12 @@ GH_TOKEN = os.environ["GITHUB_TOKEN"]
 STATE_FILE = "state.json"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (ticket-checker)"
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/120.0 Safari/537.36"
+    )
 }
 
 session = requests.Session()
@@ -61,6 +68,12 @@ def load_state():
         state = json.loads(raw)
 
         state["_sha"] = data["sha"]
+
+        # На случай, если в старом state
+        # какого-то поля ещё нет.
+        state.setdefault("subscribers", [])
+        state.setdefault("offset", 0)
+        state.setdefault("events", {})
 
         return state
 
@@ -175,9 +188,9 @@ def process_telegram_updates(state):
                     "chat_id": chat_id,
                     "text": (
                         "Готово! 🎭\n\n"
-                        "Я буду проверять афишу "
+                        "Я буду проверять билеты "
                         "Театра кукол и сообщать, "
-                        "когда появятся места."
+                        "когда появятся свободные места."
                     )
                 }
             )
@@ -193,6 +206,10 @@ def parse_event_list(html):
 
     result = {}
 
+    # Поддерживаем:
+    # 04.10.2026 11:15
+    # 4.10.2026 11:15
+    # 04.10.2026 в 11:15
     date_re = re.compile(
         r"\b(\d{1,2}\.\d{1,2}\.\d{4})"
         r"\s+(?:в\s+)?"
@@ -213,14 +230,21 @@ def parse_event_list(html):
 
         parsed = urlparse(href)
 
+        # Не уходим на сторонние сайты.
         if (
             parsed.netloc
             and parsed.netloc != site_host
         ):
             continue
 
-        # Берём только страницы конкретных спектаклей.
-        if "/afisha/item/" not in parsed.path:
+        # Не рассматриваем саму страницу афиши
+        # и прочие служебные ссылки.
+        if parsed.path.rstrip("/") in (
+            "",
+            "/afisha",
+            "/bilety",
+            "/bilety/afisha",
+        ):
             continue
 
         title = " ".join(
@@ -230,13 +254,11 @@ def parse_event_list(html):
             ).split()
         )
 
-        if not title:
-            title = "Спектакль"
-
+        # Ищем дату и время в родительском
+        # блоке ссылки.
         parent = a
         context = ""
 
-        # Ищем дату выше по HTML-структуре.
         for _ in range(10):
 
             parent = parent.parent
@@ -266,6 +288,16 @@ def parse_event_list(html):
             1
         )[0]
 
+        # Иногда ссылка может вести
+        # не непосредственно на билет,
+        # а на внутреннюю страницу.
+        if key == AFISHA:
+            continue
+
+        # Название спектакля.
+        if not title or len(title) < 2:
+            title = "Спектакль"
+
         result[key] = {
             "title": title,
             "date": date_s,
@@ -287,6 +319,7 @@ def page_has_available_seat(html):
         strip=True
     ).lower()
 
+    # Явные признаки отсутствия мест.
     sold_out = [
         "мест нет",
         "нет мест",
@@ -301,8 +334,8 @@ def page_has_available_seat(html):
     ):
         return False
 
-    # На сайте свободные места
-    # обозначаются зелёным цветом.
+    # Свободные места на схеме,
+    # по твоему скриншоту, обозначаются зелёным.
     green_markers = [
         "#00ff00",
         "#008000",
@@ -312,9 +345,15 @@ def page_has_available_seat(html):
         "#00d000",
         "#00e000",
         "#00f000",
+
         "rgb(0, 255, 0)",
         "rgb(0,255,0)",
+
+        "rgba(0, 255, 0",
+        "rgba(0,255,0",
+
         "green",
+
         "свобод",
         "free",
         "available",
@@ -336,16 +375,15 @@ def page_has_available_seat(html):
             in element.attrs.items()
         ).lower()
 
-        # Сначала проверяем,
-        # относится ли элемент к месту.
+        # Проверяем только элементы,
+        # похожие на места.
         if not any(
             marker in attrs
             for marker in seat_markers
         ):
             continue
 
-        # Затем ищем зелёный/
-        # доступный маркер.
+        # Ищем зелёный/свободный маркер.
         if any(
             marker in attrs
             for marker in green_markers
@@ -374,8 +412,6 @@ def scan():
         f"events={len(events)}"
     )
 
-    print(response.text[:3000])
-    
     results = []
 
     for event in events:
@@ -444,6 +480,8 @@ def main():
             event["available"]
         )
 
+        # Уведомляем только при переходе:
+        # НЕ было мест -> появились места.
         if new and not old:
 
             message = (
