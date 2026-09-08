@@ -374,6 +374,8 @@ def scan():
         f"events={len(events)}"
     )
 
+    print(response.text[:3000])
+    
     results = []
 
     for event in events:
