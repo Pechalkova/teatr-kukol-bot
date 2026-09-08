@@ -156,10 +156,8 @@ def process_telegram_updates(state):
 
     return state
 
-
 def parse_event_list(html):
     soup = BeautifulSoup(html, "html.parser")
-
     result = {}
 
     date_re = re.compile(
@@ -167,27 +165,22 @@ def parse_event_list(html):
     )
 
     for a in soup.find_all("a", href=True):
-
         href = urljoin(AFISHA, a["href"])
         parsed = urlparse(href)
 
-        if (
-            parsed.netloc
-            and parsed.netloc != urlparse(SITE).netloc
-        ):
+        if parsed.netloc and parsed.netloc != urlparse(SITE).netloc:
             continue
 
-        title = " ".join(
-            a.get_text(" ", strip=True).split()
-        )
+        title = " ".join(a.get_text(" ", strip=True).split())
 
         if not title or len(title) < 2:
             continue
 
+        # Берём большой кусок текста вокруг ссылки.
         parent = a
         context = ""
 
-        for _ in range(4):
+        for _ in range(7):
             parent = parent.parent
 
             if not parent:
@@ -208,6 +201,10 @@ def parse_event_list(html):
         date_s, time_s = match.groups()
 
         key = href.split("#", 1)[0]
+
+        # Не добавляем служебные ссылки.
+        if "/afisha" in key.rstrip("/"):
+            continue
 
         result[key] = {
             "title": title,
