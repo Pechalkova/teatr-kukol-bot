@@ -1,4 +1,3 @@
-```python
 import asyncio
 from playwright.async_api import async_playwright
 
@@ -44,7 +43,10 @@ async def main():
             )
 
             print()
-            print("HTTP STATUS:", response.status if response else "NO RESPONSE")
+            print(
+                "HTTP STATUS:",
+                response.status if response else "NO RESPONSE"
+            )
             print("FINAL URL:", page.url)
             print()
 
@@ -76,10 +78,15 @@ async def main():
 
             if "Making sure you're not a bot" in text:
                 print("RESULT: ANUBIS CHALLENGE IS STILL ACTIVE")
+
             elif "Киви" in text or "КИВИ" in text:
                 print("RESULT: EVENT PAGE LOADED")
+
             else:
-                print("RESULT: PAGE LOADED, BUT EVENT TEXT NOT FOUND")
+                print(
+                    "RESULT: PAGE LOADED, "
+                    "BUT EVENT TEXT NOT FOUND"
+                )
 
         except Exception as e:
             print()
