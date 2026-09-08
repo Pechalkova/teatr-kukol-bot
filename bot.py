@@ -247,6 +247,15 @@ def parse_event_list(html):
         SITE
     ).netloc
 
+    # Служебные страницы, которые НЕ являются спектаклями.
+    excluded_paths = {
+        "/bilety",
+        "/bilety/afisha",
+        "/bilety/kak-kupit",
+        "/bilety/polzovatelskoe-soglashenie",
+        "/afisha",
+    }
+
     for a in soup.find_all(
         "a",
         href=True
@@ -277,13 +286,25 @@ def parse_event_list(html):
         ):
             continue
 
-        if parsed.path.rstrip("/") in (
-            "",
-            "/afisha",
-            "/bilety",
-            "/bilety/afisha",
-        ):
+        path = parsed.path.rstrip("/")
+
+        if path in excluded_paths:
             continue
+
+        # На странице афиши нам нужны только ссылки
+        # на конкретные страницы мероприятий.
+        #
+        # Служебные разделы сайта находятся под /bilety/,
+        # поэтому отбрасываем известные служебные URL.
+        if path.startswith("/bilety/"):
+            last_part = path.split("/")[-1].lower()
+
+            if last_part in {
+                "kak-kupit",
+                "polzovatelskoe-soglashenie",
+                "afisha",
+            }:
+                continue
 
         title = " ".join(
             a.get_text(
@@ -292,10 +313,15 @@ def parse_event_list(html):
             ).split()
         )
 
+        if not title or len(title) < 2:
+            continue
+
+        # Ищем дату и время в ближайшем контейнере
+        # ссылки.
         parent = a
         context = ""
 
-        for _ in range(10):
+        for _ in range(8):
 
             parent = parent.parent
 
@@ -323,6 +349,25 @@ def parse_event_list(html):
 
         date_s, time_s = match.groups()
 
+        # Дополнительная защита от служебных ссылок.
+        lower_title = title.lower()
+        lower_path = path.lower()
+
+        forbidden_words = [
+            "как купить",
+            "пользовательское соглашение",
+            "контакты",
+            "новости",
+            "о театре",
+        ]
+
+        if any(
+            word in lower_title
+            or word in lower_path
+            for word in forbidden_words
+        ):
+            continue
+
         key = href.split(
             "#",
             1
@@ -330,9 +375,6 @@ def parse_event_list(html):
 
         if key == AFISHA:
             continue
-
-        if not title or len(title) < 2:
-            title = "Спектакль"
 
         result[key] = {
             "title": title,
@@ -440,7 +482,6 @@ def scan():
         f"events={len(events)}"
     )
 
-    # Диагностика найденных событий.
     for event in events:
         print(
             "EVENT FOUND:",
