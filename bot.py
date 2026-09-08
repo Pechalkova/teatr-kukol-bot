@@ -7,6 +7,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+
 SITE = "https://puppet-minsk.by"
 AFISHA = SITE + "/afisha"
 
@@ -26,23 +27,41 @@ session.headers.update(HEADERS)
 
 def github_api(method, url, **kwargs):
     headers = kwargs.pop("headers", {})
+
     headers.update({
         "Authorization": f"Bearer {GH_TOKEN}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     })
-    return session.request(method, url, headers=headers, timeout=30, **kwargs)
+
+    return session.request(
+        method,
+        url,
+        headers=headers,
+        timeout=30,
+        **kwargs
+    )
 
 
 def load_state():
-    url = f"https://api.github.com/repos/{REPO}/contents/{STATE_FILE}"
+    url = (
+        f"https://api.github.com/repos/"
+        f"{REPO}/contents/{STATE_FILE}"
+    )
+
     r = github_api("GET", url)
 
     if r.status_code == 200:
         data = r.json()
-        raw = base64.b64decode(data["content"]).decode("utf-8")
+
+        raw = base64.b64decode(
+            data["content"]
+        ).decode("utf-8")
+
         state = json.loads(raw)
+
         state["_sha"] = data["sha"]
+
         return state
 
     if r.status_code == 404:
@@ -53,7 +72,8 @@ def load_state():
         }
 
     raise RuntimeError(
-        f"GitHub state read failed: {r.status_code}"
+        f"GitHub state read failed: "
+        f"{r.status_code}"
     )
 
 
@@ -77,7 +97,10 @@ def save_state(state):
     if sha:
         payload["sha"] = sha
 
-    url = f"https://api.github.com/repos/{REPO}/contents/{STATE_FILE}"
+    url = (
+        f"https://api.github.com/repos/"
+        f"{REPO}/contents/{STATE_FILE}"
+    )
 
     r = github_api(
         "PUT",
@@ -87,7 +110,8 @@ def save_state(state):
 
     if not r.ok:
         raise RuntimeError(
-            f"GitHub state write failed: {r.status_code}"
+            f"GitHub state write failed: "
+            f"{r.status_code}"
         )
 
 
@@ -126,6 +150,7 @@ def process_telegram_updates(state):
     )
 
     for update in updates:
+
         state["offset"] = max(
             state.get("offset", 0),
             update["update_id"] + 1
@@ -135,9 +160,12 @@ def process_telegram_updates(state):
         chat = message.get("chat") or {}
 
         chat_id = chat.get("id")
-        text = (message.get("text") or "").strip()
+        text = (
+            message.get("text") or ""
+        ).strip()
 
         if chat_id and text.startswith("/start"):
+
             if chat_id not in state["subscribers"]:
                 state["subscribers"].append(chat_id)
 
@@ -156,38 +184,71 @@ def process_telegram_updates(state):
 
     return state
 
+
 def parse_event_list(html):
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
+
     result = {}
 
     date_re = re.compile(
-        r"\b(\d{2}\.\d{2}\.\d{4})\s+(\d{1,2}:\d{2})\b"
+        r"\b(\d{1,2}\.\d{1,2}\.\d{4})"
+        r"\s+(?:в\s+)?"
+        r"(\d{1,2}:\d{2})\b"
     )
 
-    for a in soup.find_all("a", href=True):
-        href = urljoin(AFISHA, a["href"])
+    site_host = urlparse(SITE).netloc
+
+    for a in soup.find_all(
+        "a",
+        href=True
+    ):
+
+        href = urljoin(
+            AFISHA,
+            a["href"]
+        )
+
         parsed = urlparse(href)
 
-        if parsed.netloc and parsed.netloc != urlparse(SITE).netloc:
+        if (
+            parsed.netloc
+            and parsed.netloc != site_host
+        ):
             continue
 
-        title = " ".join(a.get_text(" ", strip=True).split())
-
-        if not title or len(title) < 2:
+        # Берём только страницы конкретных спектаклей.
+        if "/afisha/item/" not in parsed.path:
             continue
 
-        # Берём большой кусок текста вокруг ссылки.
+        title = " ".join(
+            a.get_text(
+                " ",
+                strip=True
+            ).split()
+        )
+
+        if not title:
+            title = "Спектакль"
+
         parent = a
         context = ""
 
-        for _ in range(7):
+        # Ищем дату выше по HTML-структуре.
+        for _ in range(10):
+
             parent = parent.parent
 
             if not parent:
                 break
 
             context = " ".join(
-                parent.get_text(" ", strip=True).split()
+                parent.get_text(
+                    " ",
+                    strip=True
+                ).split()
             )
 
             if date_re.search(context):
@@ -200,11 +261,10 @@ def parse_event_list(html):
 
         date_s, time_s = match.groups()
 
-        key = href.split("#", 1)[0]
-
-        # Не добавляем служебные ссылки.
-        if "/afisha" in key.rstrip("/"):
-            continue
+        key = href.split(
+            "#",
+            1
+        )[0]
 
         result[key] = {
             "title": title,
@@ -217,9 +277,15 @@ def parse_event_list(html):
 
 
 def page_has_available_seat(html):
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
 
-    text = soup.get_text(" ", strip=True).lower()
+    text = soup.get_text(
+        " ",
+        strip=True
+    ).lower()
 
     sold_out = [
         "мест нет",
@@ -229,9 +295,14 @@ def page_has_available_seat(html):
         "sold out",
     ]
 
-    if any(word in text for word in sold_out):
+    if any(
+        word in text
+        for word in sold_out
+    ):
         return False
 
+    # На сайте свободные места
+    # обозначаются зелёным цветом.
     green_markers = [
         "#00ff00",
         "#008000",
@@ -258,18 +329,32 @@ def page_has_available_seat(html):
     ]
 
     for element in soup.find_all(True):
+
         attrs = " ".join(
             f"{key}={value}"
-            for key, value in element.attrs.items()
+            for key, value
+            in element.attrs.items()
         ).lower()
 
-        if not any(marker in attrs for marker in seat_markers):
+        # Сначала проверяем,
+        # относится ли элемент к месту.
+        if not any(
+            marker in attrs
+            for marker in seat_markers
+        ):
             continue
 
-        if any(marker in attrs for marker in green_markers):
+        # Затем ищем зелёный/
+        # доступный маркер.
+        if any(
+            marker in attrs
+            for marker in green_markers
+        ):
             return True
 
     return False
+
+
 def scan():
     response = session.get(
         AFISHA,
@@ -277,15 +362,24 @@ def scan():
     )
 
     response.raise_for_status()
-events = parse_event_list(
-    response.text
-)
 
-results = []
+    events = parse_event_list(
+        response.text
+    )
+
+    print(
+        f"AFISHA DEBUG: "
+        f"status={response.status_code}; "
+        f"bytes={len(response.text)}; "
+        f"events={len(events)}"
+    )
+
+    results = []
 
     for event in events:
 
         try:
+
             page = session.get(
                 event["url"],
                 timeout=30
@@ -298,14 +392,17 @@ results = []
             )
 
         except Exception as error:
+
             print(
                 "EVENT ERROR",
                 event["url"],
                 repr(error)
             )
+
             continue
 
         event["available"] = available
+
         results.append(event)
 
     return results
@@ -320,15 +417,18 @@ def main():
     )
 
     try:
+
         events = scan()
 
     except Exception as error:
+
         print(
             "AFISHA ERROR:",
             repr(error)
         )
 
         save_state(state)
+
         return
 
     for event in events:
@@ -358,6 +458,7 @@ def main():
             ):
 
                 try:
+
                     tg(
                         "sendMessage",
                         {
@@ -367,13 +468,16 @@ def main():
                     )
 
                 except Exception as error:
+
                     print(
                         "TELEGRAM ERROR",
                         chat_id,
                         repr(error)
                     )
 
-        state["events"][event["url"]] = new
+        state["events"][
+            event["url"]
+        ] = new
 
     save_state(state)
 
