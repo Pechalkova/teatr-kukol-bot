@@ -1,4 +1,5 @@
 {
-  "events": {},
-  "initialized": false
+  "subscribers": [],
+  "offset": 0,
+  "events": {}
 }
