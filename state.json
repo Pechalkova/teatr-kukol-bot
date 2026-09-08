@@ -5,6 +5,7 @@
   "offset": 143457375,
   "events": {
     "https://puppet-minsk.by/bilety/kak-kupit": false,
-    "https://puppet-minsk.by/bilety/polzovatelskoe-soglashenie": false
+    "https://puppet-minsk.by/bilety/polzovatelskoe-soglashenie": false,
+    "https://puppet-minsk.by/": false
   }
 }
