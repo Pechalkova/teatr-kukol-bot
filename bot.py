@@ -9,8 +9,6 @@ from bs4 import BeautifulSoup
 
 
 SITE = "https://puppet-minsk.by"
-
-# Страница, где находятся билеты и афиша
 AFISHA = SITE + "/bilety/afisha"
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -69,11 +67,20 @@ def load_state():
 
         state["_sha"] = data["sha"]
 
-        # На случай, если в старом state
-        # какого-то поля ещё нет.
-        state.setdefault("subscribers", [])
-        state.setdefault("offset", 0)
-        state.setdefault("events", {})
+        state.setdefault(
+            "subscribers",
+            []
+        )
+
+        state.setdefault(
+            "offset",
+            0
+        )
+
+        state.setdefault(
+            "events",
+            {}
+        )
 
         return state
 
@@ -151,36 +158,60 @@ def tg(method, payload=None):
 
 
 def process_telegram_updates(state):
-    offset = state.get("offset", 0)
+    offset = state.get(
+        "offset",
+        0
+    )
 
     updates = tg(
         "getUpdates",
         {
             "offset": offset,
             "timeout": 0,
-            "allowed_updates": ["message"]
+            "allowed_updates": [
+                "message"
+            ]
         }
     )
 
     for update in updates:
 
         state["offset"] = max(
-            state.get("offset", 0),
+            state.get(
+                "offset",
+                0
+            ),
             update["update_id"] + 1
         )
 
-        message = update.get("message") or {}
-        chat = message.get("chat") or {}
+        message = (
+            update.get("message")
+            or {}
+        )
 
-        chat_id = chat.get("id")
+        chat = (
+            message.get("chat")
+            or {}
+        )
+
+        chat_id = chat.get(
+            "id"
+        )
+
         text = (
-            message.get("text") or ""
+            message.get("text")
+            or ""
         ).strip()
 
-        if chat_id and text.startswith("/start"):
+        if (
+            chat_id
+            and text.startswith("/start")
+        ):
 
             if chat_id not in state["subscribers"]:
-                state["subscribers"].append(chat_id)
+                state["subscribers"].append(
+                    chat_id
+                )
 
             tg(
                 "sendMessage",
@@ -206,17 +237,15 @@ def parse_event_list(html):
 
     result = {}
 
-    # Поддерживаем:
-    # 04.10.2026 11:15
-    # 4.10.2026 11:15
-    # 04.10.2026 в 11:15
     date_re = re.compile(
         r"\b(\d{1,2}\.\d{1,2}\.\d{4})"
         r"\s+(?:в\s+)?"
         r"(\d{1,2}:\d{2})\b"
     )
 
-    site_host = urlparse(SITE).netloc
+    site_host = urlparse(
+        SITE
+    ).netloc
 
     for a in soup.find_all(
         "a",
@@ -228,7 +257,21 @@ def parse_event_list(html):
             a["href"]
         )
 
-        parsed = urlparse(href)
+        parsed = urlparse(
+            href
+        )
+
+        # Телефоны и другие не-HTTP ссылки
+        # не являются страницами спектаклей.
+        if parsed.scheme == "tel":
+            continue
+
+        if parsed.scheme not in (
+            "",
+            "http",
+            "https"
+        ):
+            continue
 
         # Не уходим на сторонние сайты.
         if (
@@ -238,7 +281,7 @@ def parse_event_list(html):
             continue
 
         # Не рассматриваем саму страницу афиши
-        # и прочие служебные ссылки.
+        # как событие.
         if parsed.path.rstrip("/") in (
             "",
             "/afisha",
@@ -254,11 +297,10 @@ def parse_event_list(html):
             ).split()
         )
 
-        # Ищем дату и время в родительском
-        # блоке ссылки.
         parent = a
         context = ""
 
+        # Ищем дату выше по HTML-структуре.
         for _ in range(10):
 
             parent = parent.parent
@@ -273,10 +315,14 @@ def parse_event_list(html):
                 ).split()
             )
 
-            if date_re.search(context):
+            if date_re.search(
+                context
+            ):
                 break
 
-        match = date_re.search(context)
+        match = date_re.search(
+            context
+        )
 
         if not match:
             continue
@@ -288,13 +334,9 @@ def parse_event_list(html):
             1
         )[0]
 
-        # Иногда ссылка может вести
-        # не непосредственно на билет,
-        # а на внутреннюю страницу.
         if key == AFISHA:
             continue
 
-        # Название спектакля.
         if not title or len(title) < 2:
             title = "Спектакль"
 
@@ -305,7 +347,9 @@ def parse_event_list(html):
             "url": key,
         }
 
-    return list(result.values())
+    return list(
+        result.values()
+    )
 
 
 def page_has_available_seat(html):
@@ -319,7 +363,6 @@ def page_has_available_seat(html):
         strip=True
     ).lower()
 
-    # Явные признаки отсутствия мест.
     sold_out = [
         "мест нет",
         "нет мест",
@@ -334,8 +377,8 @@ def page_has_available_seat(html):
     ):
         return False
 
-    # Свободные места на схеме,
-    # по твоему скриншоту, обозначаются зелёным.
+    # На схеме зала зелёные места
+    # означают свободные места.
     green_markers = [
         "#00ff00",
         "#008000",
@@ -375,15 +418,12 @@ def page_has_available_seat(html):
             in element.attrs.items()
         ).lower()
 
-        # Проверяем только элементы,
-        # похожие на места.
         if not any(
             marker in attrs
             for marker in seat_markers
         ):
             continue
 
-        # Ищем зелёный/свободный маркер.
         if any(
             marker in attrs
             for marker in green_markers
@@ -441,7 +481,9 @@ def scan():
 
         event["available"] = available
 
-        results.append(event)
+        results.append(
+            event
+        )
 
     return results
 
@@ -465,7 +507,9 @@ def main():
             repr(error)
         )
 
-        save_state(state)
+        save_state(
+            state
+        )
 
         return
 
@@ -480,8 +524,8 @@ def main():
             event["available"]
         )
 
-        # Уведомляем только при переходе:
-        # НЕ было мест -> появились места.
+        # Сообщаем только тогда,
+        # когда место появилось.
         if new and not old:
 
             message = (
@@ -519,7 +563,9 @@ def main():
             event["url"]
         ] = new
 
-    save_state(state)
+    save_state(
+        state
+    )
 
     print(
         f"Checked {len(events)} events; "
